@@ -2,18 +2,14 @@ const express = require("express");
 const app = express();
 app.use(express.json());
 
-// =============================================
-// ⚙️  CONFIGURAÇÕES — edite aqui
-// =============================================
-const DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1479166160997056736/nX8lL-iMrrIXPlMhyG15Dt2-SogPobv17h0--hWuC8Ht5327iTNrn92t23XbZ5BkjygL";
+const DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1479166160997056736/nX81l-iMrr1XP1MhyG15Dt2-SogPobv17h0--hWuC8Ht5327iTNrn92t23XbZ5BkjygL";
 const ASAAS_API_KEY = "$aact_prod_000MzkwODA2MWY2OGM3MWRlMDU2NWM3MzJlNzZmNGZhZGY6Ojk1NjhlZGFjLTQzZTEtNGYyOC05ZTJjLTA3N2IyMTQyZjcwODo6JGFhY2hfYTZhYmNjOWUtM2E2ZS00ODkxLWEwZDItN2YzMDI1OTRlODY1";
 const PORT = 3000;
-// =============================================
 
 const EVENTOS = {
   PAYMENT_CONFIRMED: "✅ Pagamento Confirmado",
   PAYMENT_RECEIVED: "💰 Pagamento Recebido",
-  PAYMENT_CREATED: "📋 Cobrança Criada",
+  PAYMENT_CREATED: "🗒️ Cobrança Criada",
   PAYMENT_OVERDUE: "⚠️ Pagamento Vencido",
   PAYMENT_DELETED: "🗑️ Cobrança Deletada",
   PAYMENT_RESTORED: "♻️ Cobrança Restaurada",
@@ -33,10 +29,7 @@ const CORES = {
 };
 
 function formatarMoeda(valor) {
-  return new Intl.NumberFormat("pt-BR", {
-    style: "currency",
-    currency: "BRL",
-  }).format(valor);
+  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(valor || 0);
 }
 
 function formatarData(dataStr) {
@@ -45,116 +38,131 @@ function formatarData(dataStr) {
   return `${dia}/${mes}/${ano}`;
 }
 
-function descricaoParcela(descricao) {
+function extrairParcela(descricao) {
   if (!descricao) return null;
   const match = descricao.match(/parcela\s+(\d+)\s+de\s+(\d+)/i);
-  if (match) return `Parcela ${match[1]} de ${match[2]}`;
-  return descricao.length > 60 ? descricao.substring(0, 60) + "..." : descricao;
+  if (match) return `${match[1]} de ${match[2]}`;
+  return null;
+}
+
+function formatarMetodo(metodo) {
+  const map = { PIX: "⚡ Pix", BOLETO: "🗒️ Boleto", CREDIT_CARD: "💳 Cartão de Crédito", DEBIT_CARD: "💳 Cartão de Débito", TRANSFER: "🔄 Transferência", CASH: "💵 Dinheiro" };
+  return map[metodo] || metodo || "—";
 }
 
 async function buscarNomeCliente(customerId) {
   try {
-    if (!customerId || typeof customerId !== "string") return null;
-    const res = await fetch(`https://api.asaas.com/v3/customers/${customerId}`, {
-      headers: { "access_token": ASAAS_API_KEY },
+    console.log("Buscando cliente:", customerId);
+    const url = `https://api.asaas.com/v3/customers/${customerId}`;
+    const resp = await fetch(url, {
+      headers: {
+        "access_token": ASAAS_API_KEY,
+        "Content-Type": "application/json"
+      }
     });
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data.name || data.tradingName || null;
+    console.log("Status da busca:", resp.status);
+    if (!resp.ok) {
+      const txt = await resp.text();
+      console.log("Erro ao buscar cliente:", txt);
+      return "Desconhecido";
+    }
+    const data = await resp.json();
+    console.log("Cliente encontrado:", data.name);
+    return data.name || "Desconhecido";
   } catch (err) {
-    console.error("Erro ao buscar cliente:", err.message);
+    console.error("Erro na busca do cliente:", err.message);
+    return "Desconhecido";
+  }
+}
+
+async function buscarPagamento(paymentId) {
+  try {
+    const url = `https://api.asaas.com/v3/payments/${paymentId}`;
+    const resp = await fetch(url, {
+      headers: {
+        "access_token": ASAAS_API_KEY,
+        "Content-Type": "application/json"
+      }
+    });
+    if (!resp.ok) return null;
+    return await resp.json();
+  } catch (err) {
+    console.error("Erro ao buscar pagamento:", err.message);
     return null;
   }
 }
 
-async function enviarParaDiscord(pagamento, evento) {
-  const tituloEvento = EVENTOS[evento] || `📌 ${evento}`;
-  const cor = CORES[evento] || 0x5865f2;
-  const parcela = descricaoParcela(pagamento.description);
-
-  let nomeCliente =
-    pagamento.customer?.name ||
-    pagamento.customerName ||
-    pagamento.customer?.tradingName ||
-    null;
-
-  if (!nomeCliente && pagamento.customer) {
-    const customerId = typeof pagamento.customer === "string"
-      ? pagamento.customer
-      : pagamento.customer?.id;
-    if (customerId) nomeCliente = await buscarNomeCliente(customerId);
-  }
-
-  nomeCliente = nomeCliente || "Desconhecido";
-
-  const fields = [
-    { name: "👤 Cliente", value: nomeCliente, inline: true },
-    { name: "💵 Valor Bruto", value: formatarMoeda(pagamento.value || 0), inline: true },
-    { name: "💳 Valor Líquido", value: formatarMoeda(pagamento.netValue || pagamento.value || 0), inline: true },
-  ];
-
-  if (parcela) fields.push({ name: "📄 Descrição", value: parcela, inline: false });
-
-  if (pagamento.billingType) {
-    const tipos = {
-      BOLETO: "🧾 Boleto",
-      CREDIT_CARD: "💳 Cartão de Crédito",
-      PIX: "⚡ Pix",
-      DEBIT_CARD: "💳 Cartão de Débito",
-      TRANSFER: "🔄 Transferência",
-    };
-    fields.push({ name: "💳 Forma de Pagamento", value: tipos[pagamento.billingType] || pagamento.billingType, inline: true });
-  }
-
-  if (pagamento.paymentDate || pagamento.confirmedDate) {
-    fields.push({ name: "📅 Data Pagamento", value: formatarData(pagamento.paymentDate || pagamento.confirmedDate), inline: true });
-  }
-
-  if (pagamento.dueDate) {
-    fields.push({ name: "📆 Vencimento", value: formatarData(pagamento.dueDate), inline: true });
-  }
-
-  if (pagamento.id) {
-    fields.push({ name: "🔑 ID Asaas", value: `\`${pagamento.id}\``, inline: false });
-  }
-
-  const payload = {
-    username: "Captain Hook 🪝",
-    avatar_url: "https://i.imgur.com/4M34hi2.png",
-    embeds: [{ title: tituloEvento, color: cor, fields, footer: { text: "Asaas • Captain Hook" }, timestamp: new Date().toISOString() }],
-  };
-
-  const res = await fetch(DISCORD_WEBHOOK_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-
-  if (!res.ok) {
-    console.error("❌ Erro ao enviar pro Discord:", await res.text());
-  } else {
-    console.log(`✅ [${evento}] Enviado — Cliente: ${nomeCliente}`);
-  }
-}
-
 app.post("/webhook/asaas", async (req, res) => {
+  res.status(200).json({ received: true });
+
   try {
-    const body = req.body;
-    const evento = body.event;
-    const pagamento = body.payment;
-    if (!evento || !pagamento) return res.status(400).json({ error: "Payload inválido" });
-    if (evento.startsWith("PAYMENT_")) await enviarParaDiscord(pagamento, evento);
-    res.status(200).json({ ok: true });
+    const { event, payment } = req.body;
+    if (!payment) return;
+
+    console.log("Webhook recebido:", event, "Payment ID:", payment.id);
+    console.log("Customer no payload:", payment.customer);
+
+    // Busca dados completos do pagamento para garantir todos os campos
+    const pagamentoCompleto = await buscarPagamento(payment.id);
+    const pag = pagamentoCompleto || payment;
+
+    // Busca nome do cliente
+    let nomeCliente = "Desconhecido";
+    const customerId = pag.customer || payment.customer;
+    
+    if (customerId && typeof customerId === "string" && customerId.startsWith("cus_")) {
+      nomeCliente = await buscarNomeCliente(customerId);
+    } else if (pag.customerName) {
+      nomeCliente = pag.customerName;
+    } else if (payment.customerName) {
+      nomeCliente = payment.customerName;
+    }
+
+    const titulo = EVENTOS[event] || `📋 ${event}`;
+    const cor = CORES[event] || 0x5865f2;
+    const parcela = extrairParcela(pag.description || payment.description);
+
+    const campos = [
+      { name: "👤 Cliente", value: nomeCliente, inline: true },
+      { name: "💵 Valor Bruto", value: formatarMoeda(pag.value || payment.value), inline: true },
+      { name: "💸 Valor Líquido", value: formatarMoeda(pag.netValue || payment.netValue), inline: true },
+    ];
+
+    if (pag.description || payment.description) {
+      campos.push({ name: "📋 Descrição", value: String(pag.description || payment.description), inline: false });
+    }
+    if (parcela) {
+      campos.push({ name: "🔢 Parcela", value: parcela, inline: true });
+    }
+
+    campos.push(
+      { name: "🏦 Forma de Pagamento", value: formatarMetodo(pag.billingType || payment.billingType), inline: true },
+      { name: "📅 Data Pagamento", value: formatarData(pag.paymentDate || pag.confirmedDate || payment.paymentDate || payment.confirmedDate), inline: true },
+      { name: "📅 Vencimento", value: formatarData(pag.dueDate || payment.dueDate), inline: true },
+      { name: "🔑 ID Asaas", value: String(pag.id || payment.id), inline: false }
+    );
+
+    const payload = {
+      username: "Captain Hook 🪝",
+      embeds: [{
+        title: titulo,
+        color: cor,
+        fields: campos,
+        footer: { text: "Asaas • Captain Hook" },
+        timestamp: new Date().toISOString(),
+      }],
+    };
+
+    await fetch(DISCORD_WEBHOOK_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      payload: JSON.stringify(payload),
+    });
+
   } catch (err) {
-    console.error("❌ Erro interno:", err);
-    res.status(500).json({ error: "Erro interno" });
+    console.error("Erro no webhook:", err.message);
   }
 });
 
-app.get("/", (req, res) => {
-  res.json({ status: "Captain Hook online 🪝", hora: new Date().toISOString() });
-});
-
-app.listen(PORT, () => {
-  console.log(`🪝 Captain Hook rodando na porta ${PORT}`);
-});
+app.get("/", (req, res) => res.send("🪝 Capitão Gancho rodando na porta " + PORT));
+app.listen(PORT, () => console.log("🪝 Capitão Gancho rodando na porta " + PORT));
