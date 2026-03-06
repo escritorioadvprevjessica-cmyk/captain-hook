@@ -163,6 +163,45 @@ app.post("/webhook/asaas", async (req, res) => {
     console.error("Erro no webhook:", err.message);
   }
 });
+app.post("/webhook/planilha", async (req, res) => {
+  res.status(200).json({ received: true });
+
+  try {
+    const { event, payment } = req.body;
+    if (!payment) return;
+
+    const pag = await buscarPagamento(payment.id) || payment;
+    const customerId = pag.customer || payment.customer;
+
+    let nomeCliente = "Desconhecido";
+    if (customerId && customerId.startsWith("cus_")) {
+      nomeCliente = await buscarNomeCliente(customerId) || "Desconhecido";
+    }
+
+    const dataRaw = pag.paymentDate || pag.confirmedDate || payment.paymentDate || payment.dueDate;
+    const dataPagamento = formatarData(dataRaw);
+
+    let status = null;
+    if (["PAYMENT_CONFIRMED", "PAYMENT_RECEIVED"].includes(event)) {
+      status = "PAGO";
+    } else if (event === "PAYMENT_OVERDUE") {
+      status = "INADIMPLENTE";
+    }
+
+    if (status && nomeCliente !== "Desconhecido") {
+      const sheetsResp = await fetch("https://script.google.com/macros/s/AKfycbwtKM8kHAdtCdUIywaTuUcVTJGHJ_r_cp2lX4JJN41dRSpgsOFjBCfdNmv15sKON2I_0w/exec", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nomeCliente, dataPagamento, status }),
+        redirect: "follow"
+      });
+      console.log(`Planilha atualizada: ${nomeCliente} | ${status}`);
+    }
+
+  } catch (err) {
+    console.error("Erro webhook planilha:", err.message);
+  }
+});
 
 app.get("/", (req, res) => res.send("🪝 Capitão Gancho rodando na porta " + PORT));
 app.listen(PORT, () => console.log("🪝 Capitão Gancho rodando na porta " + PORT));
