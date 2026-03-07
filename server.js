@@ -5,7 +5,7 @@ app.use(express.json());
 // =============================================
 // ⚙️  CONFIGURAÇÕES — edite aqui
 // =============================================
-const DISCORD_WEBHOOK_URL = "COLE_AQUI_A_URL_DO_WEBHOOK_DO_DISCORD";
+const DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1479166160997056736/nX81l-iMrr1XP1MhyG15Dt2-SogPobv17h0--hWuC8Ht5327iTNrn92t23XbZ5BkjygL";
 const ASAAS_API_KEY = "$aact_prod_000MzkwODA2MWY2OGM3MWRlMDU2NWM3MzJlNzZmNGZhZGY6Ojk1NjhlZGFjLTQzZTEtNGYyOC05ZTJjLTA3N2IyMTQyZjcwODo6JGFhY2hfYTZhYmNjOWUtM2E2ZS00ODkxLWEwZDItN2YzMDI1OTRlODY1";
 const PORT = 3000;
 // =============================================
